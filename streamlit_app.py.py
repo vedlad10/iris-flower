@@ -13,7 +13,7 @@ svm_clf = Pipeline([
 ])
 svm_clf.fit(X, y)
 st.title("Iris Flower Classifier 🌸")
-petal_length = st.slider("Petal Length (cm)", 0.1, 7.0, 5.0)
+petal_length = st.slider("Petal Length (cm)", 1.0, 7.0, 5.0)
 petal_width = st.slider("Petal Width (cm)", 0.1, 3.0, 1.5)
 if st.button("Predict"):
     sample = np.array([[petal_length, petal_width]])
@@ -24,3 +24,4 @@ if st.button("Predict"):
 import joblib
 
 joblib.dump(svm_clf, "svm_iris_model.pkl")
+
