@@ -52,6 +52,11 @@ Entries are evaluated **only on closed bars**, so signals never repaint.
   the entry price.
 - Trailing stop: `1.5 x ATR` behind price, and it only ever moves in your
   favour — never loosened.
+- Opposite cross: if the EMAs cross back the other way, the position is closed
+  and (filters permitting) reversed. Without this a trend EA can sit in a
+  losing position long after the trend that justified it has turned, riding it
+  all the way to the stop. Closing is allowed even when the session, spread and
+  daily-loss filters would block a *new* entry — reducing risk is never blocked.
 - All positions are closed before the weekend (Friday 20:00 server time by
   default), because gold gaps over the weekend and a gap through your stop is
   an uncontrolled loss.
@@ -93,6 +98,7 @@ Entries are evaluated **only on closed bars**, so signals never repaint.
 | `InpATRStopMult` | 2.0 | Stop distance in ATR. Below ~1.5 on gold you get stopped out by normal noise. |
 | `InpATRTargetMult` | 3.0 | Target distance in ATR. |
 | `InpRiskPercent` | 1.0 | Risk per trade, % of balance. |
+| `InpCloseOnOpposite` | true | Close and reverse when the EMAs cross back. |
 | `InpMaxDailyLossPct` | 3.0 | Daily loss circuit breaker. 0 disables. |
 | `InpMaxSpreadPoints` | 50 | Max spread for entries. **Check your broker's typical gold spread and adjust.** |
 | `InpSessionStartHour` / `InpSessionEndHour` | 7 / 20 | Trading window, **server time**. |
@@ -116,7 +122,14 @@ wrong is the single most common reason a session filter silently does nothing.
    an **XAUUSD H1** chart.
 5. In the dialog, on the *Common* tab, tick **Allow Algo Trading**. Set your
    inputs on the *Inputs* tab.
-6. Make sure the **Algo Trading** button in the toolbar is green.
+6. Make sure the **Algo Trading** button in the toolbar is green. The EA logs a
+   warning on startup if either this or the per-EA checkbox is off — check the
+   **Experts** tab after attaching.
+
+The EA deliberately ignores the bar that is already in progress when you attach
+it, so it will not fire a trade the instant it loads. The first entry can only
+happen at the next bar open — on H1, up to an hour later. That is intentional,
+not a fault.
 
 ### Symbol names vary
 

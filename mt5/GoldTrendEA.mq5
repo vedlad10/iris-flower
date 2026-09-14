@@ -27,6 +27,7 @@ input int             InpMaxPositions     = 1;          // Max concurrent positi
 input double          InpMaxDailyLossPct  = 3.0;        // Halt new entries after this daily loss % (0 = off)
 
 input group "=== Trade management ==="
+input bool            InpCloseOnOpposite  = true;       // Close (and reverse) on an opposite cross
 input bool            InpUseBreakEven     = true;       // Move stop to entry once in profit
 input double          InpBreakEvenATRMult = 1.0;        // Break-even trigger = ATR x this
 input bool            InpUseTrailing      = true;       // Trail the stop
@@ -117,6 +118,19 @@ int OnInit()
             ". Re-check the ATR multipliers and spread filter before trading.");
 
    ResetDayAnchor();
+
+   // Consume the bar in progress so attaching the EA mid-bar cannot fire an
+   // immediate trade on a cross that formed before it was loaded. The first
+   // entry can only happen at the next bar open.
+   g_lastBarTime = iTime(_Symbol, InpTimeframe, 0);
+
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+      Print("WARNING: algo trading is disabled in the terminal. The 'Algo Trading' "
+            "toolbar button must be green or no orders will be sent.");
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+      Print("WARNING: 'Allow Algo Trading' is not ticked for this EA. Re-attach it "
+            "and enable the checkbox on the Common tab.");
+
    Print("GoldTrendEA initialised on ", _Symbol, " ", EnumToString(InpTimeframe),
          " | risk ", DoubleToString(InpRiskPercent, 2), "% per trade");
    return(INIT_SUCCEEDED);
@@ -157,15 +171,22 @@ void OnTick()
 
    ManageOpenPositions(atr);
 
+   if(!IsNewBar())
+      return;
+
+   int signal = GetSignal();
+
+   // Closing reduces risk, so an opposite cross is acted on even when the
+   // filters below would block a new entry. Otherwise a position could sit
+   // against a trend that already turned, all the way down to its stop.
+   if(signal != 0 && InpCloseOnOpposite)
+      CloseOpposingPositions(signal);
+
+   if(signal == 0)                            return;
    if(g_haltedToday)                          return;
-   if(!IsNewBar())                            return;
    if(!SessionAllows())                       return;
    if(!SpreadOK())                            return;
    if(CountOwnPositions() >= InpMaxPositions) return;
-
-   int signal = GetSignal();
-   if(signal == 0)
-      return;
 
    OpenTrade(signal, atr);
   }
@@ -256,9 +277,13 @@ void OpenTrade(const int dir, const double atr)
       PrintFormat("Order failed: retcode=%d (%s)",
                   g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
    else if(InpVerboseLog)
-      PrintFormat("Opened %s %.2f lots @ %.*f | SL %.*f | TP %.*f | ATR %.*f",
-                  (dir > 0 ? "BUY" : "SELL"), lots,
-                  g_digits, price, g_digits, sl, g_digits, tp, g_digits, atr);
+      PrintFormat("Opened %s %s lots @ %s | SL %s | TP %s | ATR %s",
+                  (dir > 0 ? "BUY" : "SELL"),
+                  DoubleToString(lots,  VolumeDigits()),
+                  DoubleToString(price, g_digits),
+                  DoubleToString(sl,    g_digits),
+                  DoubleToString(tp,    g_digits),
+                  DoubleToString(atr,   g_digits));
   }
 
 //+------------------------------------------------------------------+
@@ -294,8 +319,8 @@ double CalcLots(const double slDistPrice, const int dir, const double price)
    if(lots <= 0.0)
      {
       if(InpVerboseLog)
-         PrintFormat("Skip: %.2f%% risk on a %.2f stop is below the broker minimum lot.",
-                     InpRiskPercent, slDistPrice);
+         PrintFormat("Skip: %s%% risk over a %s stop is below the broker minimum lot.",
+                     DoubleToString(InpRiskPercent, 2), DoubleToString(slDistPrice, g_digits));
       return(0.0);
      }
 
@@ -429,7 +454,7 @@ void ManageOpenPositions(const double atr)
          PrintFormat("Stop update failed on #%I64u: retcode=%d (%s)",
                      ticket, g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
       else if(InpVerboseLog)
-         PrintFormat("Stop moved on #%I64u to %.*f", ticket, g_digits, candidate);
+         PrintFormat("Stop moved on #%I64u to %s", ticket, DoubleToString(candidate, g_digits));
      }
   }
 
@@ -448,6 +473,29 @@ int CountOwnPositions()
       count++;
      }
    return(count);
+  }
+
+//+------------------------------------------------------------------+
+//| Close positions held against a fresh signal                      |
+//+------------------------------------------------------------------+
+void CloseOpposingPositions(const int signal)
+  {
+   long against = (signal > 0) ? POSITION_TYPE_SELL : POSITION_TYPE_BUY;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)                                          continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)        continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      if(PositionGetInteger(POSITION_TYPE) != against)         continue;
+
+      if(!g_trade.PositionClose(ticket))
+         PrintFormat("Reverse-close failed on #%I64u: retcode=%d (%s)",
+                     ticket, g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+      else if(InpVerboseLog)
+         PrintFormat("Closed #%I64u on an opposite signal", ticket);
+     }
   }
 
 //+------------------------------------------------------------------+
